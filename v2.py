@@ -23,6 +23,8 @@ val_data = data[n:]
 batch_size = 32
 context_size = 8
 n_embd = 32
+eval_interval = 300
+eval_iters = 200
 
 def get_batch(split):
     data = train_data if split == "train" else val_data
@@ -30,6 +32,20 @@ def get_batch(split):
     x = torch.stack([data[i : i + context_size] for i in ix])
     y = torch.stack([data[i + 1 : i + context_size + 1] for i in ix])
     return x, y
+
+@torch.no_grad()
+def estimate_loss():
+    out = {}
+    model.eval()
+    for split in ['train', 'val']:
+        losses = torch.zeros(eval_iters)
+        for k in range(eval_iters):
+            X, Y = get_batch(split)
+            logits, loss = model(X, Y)
+            losses[k] = loss.item()
+        out[split] = losses.mean()
+    model.train()
+    return out
 
 class Head(nn.Module):
     def __init__(self, head_size):
@@ -51,12 +67,20 @@ class Head(nn.Module):
         v = self.value(x)
         return wei @ v
 
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+
+    def forward(self, x):
+        return torch.cat([h(x) for h in self.heads], dim=-1)
+
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(context_size, n_embd)
-        self.sa_head = Head(n_embd)
+        self.sa_heads = MultiHeadAttention(4, n_embd // 4)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -65,7 +89,7 @@ class BigramLanguageModel(nn.Module):
         tok_emb = self.token_embedding_table(idx)
         pos_emb = self.position_embedding_table(torch.arange(T))
         x = tok_emb + pos_emb
-        x = self.sa_head(x)
+        x = self.sa_heads(x)
         logits = self.lm_head(x)
 
         if targets is None:
@@ -92,15 +116,16 @@ model = BigramLanguageModel()
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
 for epoch in range(10000):
+    if epoch % eval_interval == 0:
+        losses = estimate_loss()
+        print(f"step {epoch}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
     xb, yb = get_batch("train")
     logits, loss = model(xb, yb)
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
 
-    if (epoch % 1000 == 0):
-        print(loss.item())
-
-init_str = "O Romeo, Romeo, wherefore art thou Romeo?"
+init_str = "\n"
 init_ids = torch.tensor([encode(init_str)], dtype=torch.long)
 print(decode(model.generate(init_ids, 1000)[0].tolist()))
