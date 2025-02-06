@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+# wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
 with open("input.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
@@ -19,6 +20,9 @@ n = int(0.9 * len(data))
 train_data = data[:n]
 val_data = data[n:]
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# HYPERPARAMETERS
 batch_size = 64
 context_size = 256
 n_embd = 384
@@ -33,6 +37,7 @@ def get_batch(split):
     ix = torch.randint(len(data) - context_size, (batch_size,))
     x = torch.stack([data[i : i + context_size] for i in ix])
     y = torch.stack([data[i + 1 : i + context_size + 1] for i in ix])
+    x, y = x.to(device), y.to(device)
     return x, y
 
 @torch.no_grad()
@@ -111,7 +116,7 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-class BigramLanguageModel(nn.Module):
+class GPT(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
@@ -124,7 +129,7 @@ class BigramLanguageModel(nn.Module):
         B, T = idx.shape
 
         tok_emb = self.token_embedding_table(idx)
-        pos_emb = self.position_embedding_table(torch.arange(T))
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device))
         x = tok_emb + pos_emb
         x = self.blocks(x)
         x = self.ln_f(x)
@@ -150,7 +155,8 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1) # upd to next token
         return idx
 
-model = BigramLanguageModel()
+model = GPT()
+model = model.to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
 for epoch in range(5000):
@@ -165,6 +171,6 @@ for epoch in range(5000):
     loss.backward()
     optimizer.step()
 
-init_str = "O Romeo, Romeo, wherefore art thou Romeo?"
-init_ids = torch.tensor([encode(init_str)], dtype=torch.long)
+init_str = "\n"
+init_ids = torch.tensor([encode(init_str)], dtype=torch.long, device=device)
 print(decode(model.generate(init_ids, 1000)[0].tolist()))
