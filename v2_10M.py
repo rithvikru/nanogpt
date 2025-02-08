@@ -42,7 +42,7 @@ def get_batch(split):
 
 @torch.no_grad()
 def estimate_loss():
-    out = {}
+    out = {} 
     model.eval()
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
@@ -108,7 +108,7 @@ class FeedForward(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(4 * n_embd, n_embd),
             nn.Dropout(dropout),
         )
@@ -157,12 +157,13 @@ class GPT(nn.Module):
 
 model = GPT()
 model = model.to(device)
+print(sum(p.numel() for p in model.parameters()) / 1e6, "M parameters")
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
 for epoch in range(5000):
     print(epoch)
     if epoch % eval_interval == 0:
-        losses = estimate_loss()
+        losses = estimate_loss() 
         print(f"step {epoch}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
 
     xb, yb = get_batch("train")
