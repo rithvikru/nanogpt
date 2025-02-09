@@ -9,10 +9,10 @@ with open("input.txt", "r", encoding="utf-8") as f:
 chars = sorted(list(set(text)))
 vocab_size = len(chars)
 
-stoi = { ch : i for i, ch in enumerate(chars) }
-itos = { i : ch for i, ch in enumerate(chars) }
-encode = lambda s : [stoi[ch] for ch in s]
-decode = lambda l : ''.join(itos[i] for i in l)
+stoi = {ch: i for i, ch in enumerate(chars)}
+itos = {i: ch for i, ch in enumerate(chars)}
+encode = lambda s: [stoi[ch] for ch in s]
+decode = lambda l: "".join(itos[i] for i in l)
 
 data = torch.tensor(encode(text), dtype=torch.long)
 
@@ -20,7 +20,7 @@ n = int(0.9 * len(data))
 train_data = data[:n]
 val_data = data[n:]
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # HYPERPARAMETERS
 batch_size = 64
@@ -32,6 +32,7 @@ dropout = 0.2
 n_layer = 6
 n_head = 6
 
+
 def get_batch(split):
     data = train_data if split == "train" else val_data
     ix = torch.randint(len(data) - context_size, (batch_size,))
@@ -40,11 +41,12 @@ def get_batch(split):
     x, y = x.to(device), y.to(device)
     return x, y
 
+
 @torch.no_grad()
 def estimate_loss():
-    out = {} 
+    out = {}
     model.eval()
-    for split in ['train', 'val']:
+    for split in ["train", "val"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = get_batch(split)
@@ -53,6 +55,7 @@ def estimate_loss():
         out[split] = losses.mean()
     model.train()
     return out
+
 
 class Head(nn.Module):
     def __init__(self, head_size):
@@ -76,6 +79,7 @@ class Head(nn.Module):
         v = self.value(x)
         return wei @ v
 
+
 class Block(nn.Module):
     def __init__(self, head_size, n_head):
         super().__init__()
@@ -90,6 +94,7 @@ class Block(nn.Module):
         x = x + self.ffwd(self.ln2(x))
         return x
 
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size):
         super().__init__()
@@ -102,6 +107,7 @@ class MultiHeadAttention(nn.Module):
         out = self.proj(out)
         out = self.dropout(out)
         return out
+
 
 class FeedForward(nn.Module):
     def __init__(self, n_embd):
@@ -116,12 +122,15 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+
 class GPT(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(context_size, n_embd)
-        self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
+        self.blocks = nn.Sequential(
+            *[Block(n_embd, n_head=n_head) for _ in range(n_layer)]
+        )
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
@@ -139,21 +148,22 @@ class GPT(nn.Module):
             loss = None
         else:
             B, T, C = logits.shape
-            logits = logits.view(B * T, C) # collapse so i can use NLL
+            logits = logits.view(B * T, C)  # collapse so i can use NLL
             targets = targets.view(B * T)
             loss = F.cross_entropy(logits, targets)
-        
+
         return logits, loss
 
     def generate(self, idx, max_new_tokens):
-        for _ in range(max_new_tokens): # gpt-like streaming
+        for _ in range(max_new_tokens):  # gpt-like streaming
             idx_cond = idx[:, -context_size:]
             logits, loss = self(idx_cond)
-            logits = logits[:, -1, :] # just get what comes next
+            logits = logits[:, -1, :]  # just get what comes next
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
-            idx = torch.cat((idx, idx_next), dim=1) # upd to next token
+            idx = torch.cat((idx, idx_next), dim=1)  # upd to next token
         return idx
+
 
 model = GPT()
 model = model.to(device)
@@ -163,8 +173,10 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for epoch in range(5000):
     print(epoch)
     if epoch % eval_interval == 0:
-        losses = estimate_loss() 
-        print(f"step {epoch}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        losses = estimate_loss()
+        print(
+            f"step {epoch}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+        )
 
     xb, yb = get_batch("train")
     logits, loss = model(xb, yb)

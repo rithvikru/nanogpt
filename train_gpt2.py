@@ -6,13 +6,15 @@ import math
 from transformers import GPT2LMHeadModel
 import tiktoken
 
+
 @dataclass
 class GPTConfig:
     block_size: int = 50257
     vocab_size: int = 50257
-    n_layer: int = 12 
+    n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
+
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -25,7 +27,12 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
 
-        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
+        self.register_buffer(
+            "bias",
+            torch.tril(torch.ones(config.block_size, config.block_size)).view(
+                1, 1, config.block_size, config.block_size
+            ),
+        )
 
     def forward(self, x):
         B, T, C = x.size()
@@ -34,16 +41,17 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        
+
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
         att = F.softmax(att, dim=-1)
 
         out = att @ v
         out = out.transpose(1, 2).contiguous().view(B, T, C)
-        
+
         return self.c_proj(out)
-        
+
+
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -56,6 +64,7 @@ class MLP(nn.Module):
         x = self.gelu(x)
         x = self.c_proj(x)
         return x
+
 
 class Block(nn.Module):
     def __init__(self, config):
@@ -70,22 +79,27 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
+
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
 
-        self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = nn.LayerNorm(config.n_embd)
-        ))
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wpe=nn.Embedding(config.block_size, config.n_embd),
+                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                ln_f=nn.LayerNorm(config.n_embd),
+            )
+        )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
     def forward(self, idx):
         B, T = idx.size()
-        assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
+        assert T <= self.config.block_size, (
+            f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
+        )
 
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
         pos_embd = self.transformer.wpe(pos)
@@ -99,34 +113,41 @@ class GPT(nn.Module):
 
     @classmethod
     def from_pretrained(cls, model_type):
-        assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
+        assert model_type in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
         print("loading weights from pretrained gpt: %s" % model_type)
 
         config_args = {
-            'gpt2':         dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
-            'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 350M params
-            'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
-            'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
+            "gpt2": dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
+            "gpt2-medium": dict(n_layer=24, n_head=16, n_embd=1024),  # 350M params
+            "gpt2-large": dict(n_layer=36, n_head=20, n_embd=1280),  # 774M params
+            "gpt2-xl": dict(n_layer=48, n_head=25, n_embd=1600),  # 1558M params
         }[model_type]
 
-        config_args['vocab_size'] = 50257
-        config_args['block_size'] = 1024
+        config_args["vocab_size"] = 50257
+        config_args["block_size"] = 1024
 
         config = GPTConfig(**config_args)
         model = GPT(config)
         sd = model.state_dict()
         sd_keys = sd.keys()
-        sd_keys = [k for k in sd_keys if not k.endswith('.attn.bias')]
+        sd_keys = [k for k in sd_keys if not k.endswith(".attn.bias")]
 
         model_hf = GPT2LMHeadModel.from_pretrained(model_type)
         sd_hf = model_hf.state_dict()
 
         sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')]
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')]
-        transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith(".attn.masked_bias")]
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith(".attn.bias")]
+        transposed = [
+            "attn.c_attn.weight",
+            "attn.c_proj.weight",
+            "mlp.c_fc.weight",
+            "mlp.c_proj.weight",
+        ]
 
-        assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+        assert len(sd_keys_hf) == len(sd_keys), (
+            f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+        )
         for k in sd_keys_hf:
             if any(k.endswith(w) for w in transposed):
                 assert sd_hf[k].shape[::-1] == sd[k].shape
@@ -138,7 +159,8 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
-    
+
+
 device = "cpu"
 if torch.cuda.is_available():
     device = "cuda"
@@ -150,9 +172,9 @@ num_return_sequences = 5
 max_length = 100
 
 model = GPT(GPTConfig())
-with open('gpt2.txt', 'r') as f:
+with open("gpt2.txt", "r") as f:
     text = f.read()
-enc = tiktoken.get_encoding('gpt2')
+enc = tiktoken.get_encoding("gpt2")
 tokens = enc.encode(text)
 tokens = torch.tensor(tokens, dtype=torch.long)
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
@@ -163,7 +185,9 @@ model.to(device)
 logits, loss = model(x)
 print(loss)
 
-import sys; sys.exit()
+import sys
+
+sys.exit()
 
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
@@ -181,4 +205,4 @@ for i in range(num_return_sequences):
     tokens = x[i, :max_length].tolist()
     decoded = enc.decode(tokens)
     print(decoded)
-    print('-' * 40)
+    print("-" * 40)
